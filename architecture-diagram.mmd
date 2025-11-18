@@ -1,0 +1,70 @@
+graph TB
+    subgraph External["🌐 External Systems"]
+        GH["GitHub Actions<br/>🔄 CI/CD Pipeline<br/>• Build Docker Image<br/>• Trivy Security Scan<br/>• Push to Docker Hub"]
+        DH["Docker Hub<br/>📦 Container Registry<br/>vendettaopppp/ml-inference-service"]
+        Dev["👨‍💻 Developer<br/>kubectl CLI"]
+    end
+
+    subgraph K8s["☸️ Kubernetes Cluster (Kind - Local)"]
+        subgraph Mon["📊 monitoring namespace"]
+            Prom["Prometheus<br/>📈 Metrics Collection<br/>• Scrapes every 30s<br/>• Stores time-series data<br/>• Evaluates 6 alert rules"]
+            Graf["Grafana<br/>📉 Dashboard<br/>• 8 visualization panels<br/>• Real-time metrics<br/>:30080"]
+            AM["AlertManager<br/>🔔 Notifications<br/>• Alert routing<br/>• Silencing"]
+        end
+
+        subgraph TenantA["🔵 tenant-a namespace"]
+            HPA_A["HPA<br/>⚡ Autoscaling<br/>2-10 pods<br/>Target: 50% CPU"]
+            Deploy_A["Deployment<br/>🚀 ML Inference<br/>FastAPI + Scikit-learn<br/>Sentiment Analysis"]
+            Svc_A["Service<br/>🌐 ClusterIP<br/>Port: 8000"]
+            RBAC_A["🔒 Security<br/>• RBAC Role<br/>• ServiceAccount<br/>• NetworkPolicy"]
+        end
+
+        subgraph TenantB["🔴 tenant-b namespace"]
+            HPA_B["HPA<br/>⚡ Autoscaling<br/>2-10 pods<br/>Target: 50% CPU"]
+            Deploy_B["Deployment<br/>🚀 ML Inference<br/>FastAPI + Scikit-learn<br/>Sentiment Analysis"]
+            Svc_B["Service<br/>🌐 ClusterIP<br/>Port: 8000"]
+            RBAC_B["🔒 Security<br/>• RBAC Role<br/>• ServiceAccount<br/>• NetworkPolicy"]
+        end
+
+        subgraph Storage["💾 minio namespace"]
+            MinIO["MinIO<br/>🗄️ Object Storage<br/>S3-Compatible<br/>• Models<br/>• Datasets<br/>• Artifacts"]
+        end
+
+        MS["Metrics Server<br/>📊 Resource Metrics<br/>CPU/Memory Collection"]
+    end
+
+    Dev -->|kubectl port-forward| K8s
+    GH -->|build + scan + push| DH
+    DH -->|pull image| K8s
+
+    Prom -->|scrape /metrics| Deploy_A
+    Prom -->|scrape /metrics| Deploy_B
+    Prom --> Graf
+    Prom --> AM
+
+    HPA_A -->|scale deployment| Deploy_A
+    HPA_B -->|scale deployment| Deploy_B
+    MS -->|provide metrics| HPA_A
+    MS -->|provide metrics| HPA_B
+
+    Deploy_A --> Svc_A
+    Deploy_B --> Svc_B
+
+    Deploy_A -.❌ blocked by NetworkPolicy.-> Deploy_B
+
+    RBAC_A -.protects.-> Deploy_A
+    RBAC_B -.protects.-> Deploy_B
+
+    style Mon fill:#e1f5e1,stroke:#2d5016,stroke-width:3px
+    style TenantA fill:#e1e5f5,stroke:#162850,stroke-width:3px
+    style TenantB fill:#f5e1e1,stroke:#501616,stroke-width:3px
+    style Storage fill:#f5f5e1,stroke:#505016,stroke-width:3px
+    style External fill:#f0f0f0,stroke:#404040,stroke-width:3px
+    
+    style Prom fill:#90EE90
+    style Graf fill:#87CEEB
+    style Deploy_A fill:#B0C4DE
+    style Deploy_B fill:#FFB6C1
+    style MinIO fill:#FFD700
+    style GH fill:#D3D3D3
+
