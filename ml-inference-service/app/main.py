@@ -1,7 +1,7 @@
 """
-FastAPI ML Inference Service
-Simple sentiment analysis model using sklearn
+FastAPI ML Inference Service with Prometheus Metrics
 """
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import numpy as np
@@ -10,6 +10,10 @@ from sklearn.naive_bayes import MultinomialNB
 import pickle
 import os
 import logging
+
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Gauge
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,13 +24,28 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Global model variables
+# ---------------------------
+# PROMETHEUS METRICS
+# ---------------------------
+
+model_loaded_gauge = Gauge("model_loaded", "Whether the ML model loaded successfully")
+vectorizer_loaded_gauge = Gauge("vectorizer_loaded", "Whether the vectorizer loaded successfully")
+
+# Add Prometheus instrumentation (the REAL metrics endpoint)
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
+
+# ---------------------------
+# MODEL
+# ---------------------------
+
 vectorizer = None
 model = None
 tenant_name = os.getenv("TENANT_NAME", "unknown")
 
+
 class PredictionRequest(BaseModel):
     text: str
+
 
 class PredictionResponse(BaseModel):
     text: str
@@ -34,122 +53,94 @@ class PredictionResponse(BaseModel):
     confidence: float
     tenant: str
 
+
 def train_simple_model():
-    """Train a simple sentiment analysis model"""
-    # Simple training data
     texts = [
         "I love this product", "This is amazing", "Great experience",
         "Excellent service", "Very good quality", "Highly recommend",
         "Terrible product", "Very disappointed", "Waste of money",
         "Poor quality", "Not recommended", "Bad experience"
     ]
-    labels = [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]  # 1=positive, 0=negative
-    
-    # Train vectorizer and model
+    labels = [1,1,1,1,1,1,0,0,0,0,0,0]
+
     vec = TfidfVectorizer(max_features=100)
     X = vec.fit_transform(texts)
-    
+
     clf = MultinomialNB()
     clf.fit(X, labels)
-    
     return vec, clf
+
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize model on startup"""
     global vectorizer, model
-    
+
     logger.info(f"Starting ML Inference Service for tenant: {tenant_name}")
-    
-    model_path = "/app/models"
-    vectorizer_path = os.path.join(model_path, "vectorizer.pkl")
-    model_file_path = os.path.join(model_path, "model.pkl")
-    
-    # Load or train model
-    if os.path.exists(vectorizer_path) and os.path.exists(model_file_path):
+
+    model_dir = "/app/models"
+    vec_path = os.path.join(model_dir, "vectorizer.pkl")
+    model_path = os.path.join(model_dir, "model.pkl")
+
+    if os.path.exists(vec_path) and os.path.exists(model_path):
         logger.info("Loading pre-trained model...")
-        with open(vectorizer_path, 'rb') as f:
+        with open(vec_path, "rb") as f:
             vectorizer = pickle.load(f)
-        with open(model_file_path, 'rb') as f:
+        with open(model_path, "rb") as f:
             model = pickle.load(f)
     else:
-        logger.info("Training new model...")
+        logger.info("Training a new model...")
         vectorizer, model = train_simple_model()
-        
-        # Save model
-        os.makedirs(model_path, exist_ok=True)
-        with open(vectorizer_path, 'wb') as f:
+        os.makedirs(model_dir, exist_ok=True)
+        with open(vec_path, "wb") as f:
             pickle.dump(vectorizer, f)
-        with open(model_file_path, 'wb') as f:
+        with open(model_path, "wb") as f:
             pickle.dump(model, f)
-    
+
+    # Update metrics AFTER model loads
+    model_loaded_gauge.set(1)
+    vectorizer_loaded_gauge.set(1)
+
     logger.info("Model loaded successfully!")
+
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": "ML Inference Service",
-        "tenant": tenant_name,
-        "version": "1.0.0"
-    }
+    return {"status": "healthy", "tenant": tenant_name}
+
 
 @app.get("/health")
 async def health():
-    """Kubernetes health check"""
     if model is None or vectorizer is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-    return {"status": "healthy", "tenant": tenant_name}
+        raise HTTPException(503, "Model not loaded")
+    return {"status": "healthy"}
+
 
 @app.get("/ready")
 async def ready():
-    """Kubernetes readiness check"""
     if model is None or vectorizer is None:
-        raise HTTPException(status_code=503, detail="Model not ready")
-    return {"status": "ready", "tenant": tenant_name}
+        raise HTTPException(503, "Model not ready")
+    return {"status": "ready"}
+
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
-    """
-    Predict sentiment of input text
-    """
     if model is None or vectorizer is None:
-        raise HTTPException(status_code=503, detail="Model not initialized")
-    
-    try:
-        # Transform input text
-        X = vectorizer.transform([request.text])
-        
-        # Make prediction
-        prediction = model.predict(X)[0]
-        probabilities = model.predict_proba(X)[0]
-        confidence = float(max(probabilities))
-        
-        sentiment = "positive" if prediction == 1 else "negative"
-        
-        logger.info(f"Prediction for tenant {tenant_name}: {sentiment} (confidence: {confidence:.2f})")
-        
-        return PredictionResponse(
-            text=request.text,
-            prediction=sentiment,
-            confidence=confidence,
-            tenant=tenant_name
-        )
-    except Exception as e:
-        logger.error(f"Prediction error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+        raise HTTPException(503, "Model not initialized")
 
-@app.get("/metrics")
-async def metrics():
-    """Simple metrics endpoint"""
-    return {
-        "tenant": tenant_name,
-        "model_loaded": model is not None,
-        "vectorizer_loaded": vectorizer is not None
-    }
+    X = vectorizer.transform([request.text])
+    prediction = model.predict(X)[0]
+    probs = model.predict_proba(X)[0]
+    confidence = float(max(probs))
+    sentiment = "positive" if prediction == 1 else "negative"
+
+    return PredictionResponse(
+        text=request.text,
+        prediction=sentiment,
+        confidence=confidence,
+        tenant=tenant_name
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
