@@ -1,0 +1,107 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ml-inference-alerts
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: ml-inference
+      interval: 30s
+      rules:
+        # Alert: High latency (response time > 5 seconds)
+        - alert: MLInferenceHighLatency
+          expr: |
+            histogram_quantile(0.95, 
+              rate(http_request_duration_seconds_bucket{job="ml-inference"}[5m])
+            ) > 5
+          for: 2m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "High latency detected in ML Inference service"
+            description: "ML Inference service in {{ $labels.namespace }} has 95th percentile latency of {{ $value }}s (threshold: 5s)"
+        
+        # Alert: Pod restarts (more than 3 restarts in 10 minutes)
+        - alert: MLInferencePodRestarts
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace=~"tenant-a|tenant-b",
+              pod=~".*ml-inference.*"
+            }[10m]) * 600 > 3
+          for: 1m
+          labels:
+            severity: critical
+            component: ml-inference
+          annotations:
+            summary: "ML Inference pod is restarting frequently"
+            description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has restarted {{ $value }} times in the last 10 minutes"
+        
+        # Alert: High error rate (>5% errors)
+        - alert: MLInferenceHighErrorRate
+          expr: |
+            (
+              sum(rate(http_requests_total{job="ml-inference", status=~"5.."}[5m])) by (namespace, pod)
+              /
+              sum(rate(http_requests_total{job="ml-inference"}[5m])) by (namespace, pod)
+            ) * 100 > 5
+          for: 5m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "High error rate in ML Inference service"
+            description: "ML Inference service in {{ $labels.namespace }} has {{ $value }}% error rate (threshold: 5%)"
+        
+        # Alert: Pod not ready
+        - alert: MLInferencePodNotReady
+          expr: |
+            kube_pod_status_ready{
+              namespace=~"tenant-a|tenant-b",
+              pod=~".*ml-inference.*",
+              condition="false"
+            } == 1
+          for: 5m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "ML Inference pod is not ready"
+            description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has been in not-ready state for more than 5 minutes"
+        
+        # Alert: High CPU usage
+        - alert: MLInferenceHighCPU
+          expr: |
+            sum(rate(container_cpu_usage_seconds_total{
+              namespace=~"tenant-a|tenant-b",
+              pod=~".*ml-inference.*"
+            }[5m])) by (namespace, pod) > 0.8
+          for: 10m
+          labels:
+            severity: warning
+            component: ml-inference
+          annotations:
+            summary: "High CPU usage in ML Inference pod"
+            description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is using {{ $value }} CPU cores (>80% of limit)"
+        
+        # Alert: High memory usage
+        - alert: MLInferenceHighMemory
+          expr: |
+            sum(container_memory_working_set_bytes{
+              namespace=~"tenant-a|tenant-b",
+              pod=~".*ml-inference.*"
+            }) by (namespace, pod) / 
+            sum(container_spec_memory_limit_bytes{
+              namespace=~"tenant-a|tenant-b",
+              pod=~".*ml-inference.*"
+            }) by (namespace, pod) > 0.9
+          for: 5m
+          labels:
+            severity: critical
+            component: ml-inference
+          annotations:
+            summary: "High memory usage in ML Inference pod"
+            description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is using {{ $value | humanizePercentage }} of memory limit"
+
