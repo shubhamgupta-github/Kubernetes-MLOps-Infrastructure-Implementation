@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-b-ml-inference
+  namespace: tenant-b
+  labels:
+    app: ml-inference
+    tenant: tenant-b
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ml-inference
+      tenant: tenant-b
+  template:
+    metadata:
+      labels:
+        app: ml-inference
+        tenant: tenant-b
+    spec:
+      serviceAccountName: tenant-b-ml-inference-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: ml-inference
+          image: ml-inference-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TENANT_NAME
+              value: "tenant-b"
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+

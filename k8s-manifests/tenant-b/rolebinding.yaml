@@ -1,0 +1,17 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tenant-b-ml-inference-rb
+  namespace: tenant-b
+  labels:
+    app: ml-inference
+    tenant: tenant-b
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tenant-b-ml-inference-role
+subjects:
+  - kind: ServiceAccount
+    name: tenant-b-ml-inference-sa
+    namespace: tenant-b
+

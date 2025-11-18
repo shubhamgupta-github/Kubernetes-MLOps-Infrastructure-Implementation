@@ -1,0 +1,18 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tenant-a-ml-inference-role
+  namespace: tenant-a
+  labels:
+    app: ml-inference
+    tenant: tenant-a
+rules:
+  # Allow reading config maps and secrets
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list"]
+  # Allow reading pods (for self-discovery)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tenant-a-ml-inference-svc
+  namespace: tenant-a
+  labels:
+    app: ml-inference
+    tenant: tenant-a
+spec:
+  selector:
+    app: ml-inference
+    tenant: tenant-a
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP
+
